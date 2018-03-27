@@ -37,6 +37,7 @@ library
                      , UndecidableInstances
   build-depends:       base >=4.9 && <4.11
                      , http-types
+                     , mtl
                      , reflex
                      , servant ==0.13.*
                      , servant-client-core == 0.13.*
