@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 module Reflex.Servant
   (
     -- * Deriving the endpoints
@@ -23,12 +24,12 @@ import Reflex
 import Control.Monad.Identity
 import Data.Coerce
 
-type ServantClientRunner m = forall a. GenericClientM a -> m (Either ServantError a)
+type ServantClientRunner cfg m = cfg -> forall a. GenericClientM a -> m (Either ServantError a)
 
 endpoint
-  :: forall t m i o. PerformEvent t m
-  => ServantClientRunner (Performable m)
-  -> Endpoint i o
+  :: forall t m ec i o. PerformEvent t m
+  => ServantClientRunner ec (Performable m)
+  -> Endpoint ec i o
   -> Event t i
   -> m (Event t (Either ServantError o))
 endpoint runner endpnt requestE = (coerceEvent :: Event t (Identity a) -> Event t a) <$>
@@ -36,8 +37,8 @@ endpoint runner endpnt requestE = (coerceEvent :: Event t (Identity a) -> Event 
 
 taggedEndpoint
   :: PerformEvent t m
-  => ServantClientRunner (Performable m)
-  -> Endpoint i o
+  => ServantClientRunner ec (Performable m)
+  -> Endpoint ec i o
   -> Event t (a, i)
   -> m (Event t (a, Either ServantError o))
 taggedEndpoint = traverseEndpoint
@@ -56,12 +57,12 @@ traverseEndpoint
   :: ( PerformEvent t m
      , Traversable f
      )
-  => ServantClientRunner (Performable m)
-  -> Endpoint i o
+  => ServantClientRunner ec (Performable m)
+  -> Endpoint ec i o
   -> Event t (f i)
   -> m (Event t (f (Either ServantError o)))
 traverseEndpoint runner endpnt requestE = do
-  performEvent $ ffor requestE $ traverse (runner . runEndpoint endpnt)
+  performEvent $ ffor requestE $ traverse (uncurry runner . runEndpoint endpnt)
 
 -- TODO:
 -- A variation of traverseEndpoint could make the response event immediate

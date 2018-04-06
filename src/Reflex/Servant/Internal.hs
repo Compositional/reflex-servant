@@ -5,6 +5,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -23,173 +24,186 @@ import Servant.Client.Core
 import Reflex.Servant.Internal.GenericClientM
 import Reflex.Servant.Internal.TypeFunction
 
+
 import qualified Network.HTTP.Types                     as H
 
 -- | A finished reflex client consisting of @:<|>@ and @Endpoint i o@
 -- for various @i@ and @o@.
-type ReflexClient api = BuildReflexClient I api
+type ReflexClient config api = BuildReflexClient config I api
 
-class HasReflexClient' I api => HasReflexClient api
-instance HasReflexClient' I api => HasReflexClient api
+class HasReflexClient' config I api => HasReflexClient config api
+instance HasReflexClient' config I api => HasReflexClient config api
 
-reflexClient :: HasReflexClient api => Proxy api -> ReflexClient api
-reflexClient api = reflexClient' (Proxy @I) api
+------------------------------------------------------------------------
+
+-- | 'EndpointConfig' that provides extra configuration to its the runner
+data ConfiguredEndpointConfig c = ConfiguredEndpointConfig c
+
+-- | An endpoint to be run by an implementation of @servant-client-core@ using
+-- configuration @c@.
+newtype Endpoint c i o = Endpoint { runEndpoint :: i -> (c, GenericClientM o)
+                                  }
+
+------------------------------------------------------------------------
+
+reflexClient :: HasReflexClient config api => config -> Proxy api -> ReflexClient config api
+reflexClient config api = reflexClient' config (Proxy @I) api
 
 -- prefix:  single-endpoint api builder
 -- api:     api (pattern matching)
-class HasReflexClient' (prefix :: *) (api :: *) where
-  type BuildReflexClient prefix api :: *
-  reflexClient' :: Proxy prefix -> Proxy api -> BuildReflexClient prefix api
+class HasReflexClient' (config :: *) (prefix :: *) (api :: *) where
+  type BuildReflexClient config prefix api :: *
+  reflexClient' :: config -> Proxy prefix -> Proxy api -> BuildReflexClient config prefix api
 
--- | Type level @Sub a = \b -> a :> b@
+-- | Type level @Sub a = (a :>) = \b -> a :> b@
 type Sub a = Lift ((:>) a)
 
--- | @forall m. 'RunClient' m => i -> m o@. A computation that can be run in
--- various @servant-client@ implementations' @ClientM@ monadic types.
-newtype Endpoint i o = Endpoint { runEndpoint :: i -> GenericClientM o }
-
-class UncurryClient (api :: *) where
-  type Arguments api :: *
-  type Result api :: *
-  unCurry :: Proxy api -> Client GenericClientM api -> Arguments api -> Result api
+class UncurryClient config (api :: *) where
+  type Arguments config api :: *
+  type Result config api :: *
+  unCurry :: config -> Proxy api -> Client GenericClientM api -> Arguments config api -> Result config api
 
 
 -- Fish
 
-instance ( HasReflexClient' prefix a
-         , HasReflexClient' prefix b
+instance ( HasReflexClient' cfg prefix a
+         , HasReflexClient' cfg prefix b
          ) =>
-         HasReflexClient' prefix (a :<|> b) where
-  type BuildReflexClient prefix (a :<|> b) = BuildReflexClient prefix a :<|> BuildReflexClient prefix b
+         HasReflexClient' cfg prefix (a :<|> b) where
+  type BuildReflexClient cfg prefix (a :<|> b) = BuildReflexClient cfg prefix a :<|> BuildReflexClient cfg prefix b
 
-  reflexClient' p _ = reflexClient' p (Proxy @a) :<|> reflexClient' p (Proxy @b)
+  reflexClient' cfg p _ = reflexClient' cfg p (Proxy @a) :<|> reflexClient' cfg p (Proxy @b)
 
 
 -- Sub (aka "path" :> ...)
 
-instance UncurryClient more => UncurryClient ((sym :: Symbol) :> more) where
-  type Arguments  (sym :> more) = Arguments more
-  type Result     (sym :> more) = Result more
-  unCurry _ c a = unCurry (Proxy @more) c a
+instance UncurryClient cfg more => UncurryClient cfg ((sym :: Symbol) :> more) where
+  type Arguments  cfg (sym :> more) = Arguments cfg more
+  type Result     cfg (sym :> more) = Result cfg more
+  unCurry cfg _ c a = unCurry cfg (Proxy @more) c a
 
-instance forall prefix (sym :: Symbol) more.
-         HasReflexClient' (prefix :.: Sub sym) more =>
-         HasReflexClient' prefix (sym :> more) where
-  type BuildReflexClient prefix (sym :> more) =
-       BuildReflexClient (prefix :.: Sub sym) more
-  reflexClient' _ _ = reflexClient' (Proxy @(prefix :.: Sub sym)) (Proxy @more)
+instance forall cfg prefix (sym :: Symbol) more.
+         HasReflexClient' cfg (prefix :.: Sub sym) more =>
+         HasReflexClient' cfg prefix (sym :> more) where
+  type BuildReflexClient cfg prefix (sym :> more) =
+       BuildReflexClient cfg (prefix :.: Sub sym) more
+  reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub sym)) (Proxy @more)
 
 
 -- Description
 
-instance UncurryClient more => UncurryClient (Description sym :> more) where
-  type Arguments  (Description sym :> more) = Arguments more
-  type Result     (Description sym :> more) = Result more
-  unCurry _ c a = unCurry (Proxy @more) c a
+instance UncurryClient cfg more => UncurryClient cfg (Description sym :> more) where
+  type Arguments  cfg (Description sym :> more) = Arguments cfg more
+  type Result     cfg (Description sym :> more) = Result cfg more
+  unCurry cfg _ c a = unCurry cfg (Proxy @more) c a
 
 
 
 -- QueryParams
 
-instance UncurryClient more => UncurryClient (QueryParams sym a :> more) where
-  type Arguments  (QueryParams sym a :> more) = [a] :<|> Arguments more
-  type Result     (QueryParams sym a :> more) = Result more
-  unCurry _ c (a :<|> as) = unCurry (Proxy @more) (c a) as
+instance ( UncurryClient cfg more
+         ) => UncurryClient cfg (QueryParams sym a :> more) where
+  type Arguments  cfg (QueryParams sym a :> more) = [a] :<|> Arguments cfg more
+  type Result     cfg (QueryParams sym a :> more) = Result cfg more
+  unCurry cfg _ c (a :<|> as) = unCurry cfg (Proxy @more) (c a) as
 
-instance ( HasReflexClient' (prefix $$ Sub (QueryParams sym a)) more
+instance ( HasReflexClient' cfg (prefix $$ Sub (QueryParams sym a)) more
          ) =>
-         HasReflexClient' prefix (QueryParams sym a :> more) where
-  type BuildReflexClient prefix (QueryParams sym a :> more) =
-    BuildReflexClient (prefix $$ Sub (QueryParams sym a)) more
-  reflexClient' _ _ = reflexClient' (Proxy @(prefix $$ Sub (QueryParams sym a))) (Proxy @more)
+         HasReflexClient' cfg prefix (QueryParams sym a :> more) where
+  type BuildReflexClient cfg prefix (QueryParams sym a :> more) =
+    BuildReflexClient cfg (prefix $$ Sub (QueryParams sym a)) more
+  reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix $$ Sub (QueryParams sym a))) (Proxy @more)
 
 
 -- ReqBody
 
-instance UncurryClient more => UncurryClient (ReqBody' mods (ct ': cts) a :> more) where
-  type Arguments  (ReqBody' mods (ct ': cts) a :> more) = a :<|> Arguments more
-  type Result     (ReqBody' mods (ct ': cts) a :> more) = Result more
-  unCurry _ c (a :<|> as) = unCurry (Proxy @more) (c a) as
+instance ( UncurryClient cfg more
+         ) => UncurryClient cfg (ReqBody' mods (ct ': cts) a :> more) where
+  type Arguments  cfg (ReqBody' mods (ct ': cts) a :> more) = a :<|> Arguments cfg more
+  type Result     cfg (ReqBody' mods (ct ': cts) a :> more) = Result cfg more
+  unCurry cfg _ c (a :<|> as) = unCurry cfg (Proxy @more) (c a) as
 
-instance ( HasReflexClient' (prefix :.: Sub (ReqBody' mods (ct ': cts) a)) more
+instance ( HasReflexClient' cfg (prefix :.: Sub (ReqBody' mods (ct ': cts) a)) more
          ) =>
-         HasReflexClient' prefix (ReqBody' mods (ct ': cts) a :> more) where
-  type BuildReflexClient prefix (ReqBody' mods (ct ': cts) a :> more) =
-    BuildReflexClient (prefix :.: Sub (ReqBody' mods (ct ': cts) a)) more
-  reflexClient' _ _ = reflexClient' (Proxy @(prefix :.: Sub (ReqBody' mods (ct ': cts) a))) (Proxy @more)
+         HasReflexClient' cfg prefix (ReqBody' mods (ct ': cts) a :> more) where
+  type BuildReflexClient cfg prefix (ReqBody' mods (ct ': cts) a :> more) =
+    BuildReflexClient cfg (prefix :.: Sub (ReqBody' mods (ct ': cts) a)) more
+  reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub (ReqBody' mods (ct ': cts) a))) (Proxy @more)
 
 
 -- Capture
 
-instance UncurryClient more => UncurryClient (Capture' mods sym a :> more) where
-  type Arguments  (Capture' mods sym a :> more) = a :<|> Arguments more
-  type Result     (Capture' mods sym a :> more) = Result more
-  unCurry _ c (a :<|> as) = unCurry (Proxy @more) (c a) as
+instance ( UncurryClient cfg more
+         ) => UncurryClient cfg (Capture' mods sym a :> more) where
+  type Arguments  cfg (Capture' mods sym a :> more) = a :<|> Arguments cfg more
+  type Result     cfg (Capture' mods sym a :> more) = Result cfg more
+  unCurry cfg _ c (a :<|> as) = unCurry cfg (Proxy @more) (c a) as
 
-instance ( HasReflexClient' (prefix :.: Sub (Capture' mods sym a)) more
+instance ( HasReflexClient' cfg (prefix :.: Sub (Capture' mods sym a)) more
          ) =>
-         HasReflexClient' prefix (Capture' mods sym a :> more) where
-  type BuildReflexClient prefix (Capture' mods sym a :> more) =
-    BuildReflexClient (prefix :.: Sub (Capture' mods sym a)) more
-  reflexClient' _ _ = reflexClient' (Proxy @(prefix :.: Sub (Capture' mods sym a))) (Proxy @more)
+         HasReflexClient' cfg prefix (Capture' mods sym a :> more) where
+  type BuildReflexClient cfg prefix (Capture' mods sym a :> more) =
+    BuildReflexClient cfg (prefix :.: Sub (Capture' mods sym a)) more
+  reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub (Capture' mods sym a))) (Proxy @more)
 
 
 -- Header'
 
-instance UncurryClient more => UncurryClient (Header' mods sym (a :: *) :> more) where
-  type Arguments  (Header' mods sym a :> more) = RequiredArgument mods a :<|> Arguments more
-  type Result     (Header' mods sym a :> more) = Result more
-  unCurry _ c (a :<|> as) = unCurry (Proxy @more) (c a) as
+instance ( UncurryClient cfg more
+         ) => UncurryClient cfg (Header' mods sym (a :: *) :> more) where
+  type Arguments  cfg (Header' mods sym a :> more) = RequiredArgument mods a :<|> Arguments cfg more
+  type Result     cfg (Header' mods sym a :> more) = Result cfg more
+  unCurry cfg _ c (a :<|> as) = unCurry cfg (Proxy @more) (c a) as
 
-instance ( HasReflexClient' (prefix :.: Sub (Header' mods sym a)) more
+instance ( HasReflexClient' cfg (prefix :.: Sub (Header' mods sym a)) more
          ) =>
-         HasReflexClient' prefix (Header' mods sym a :> more) where
-  type BuildReflexClient prefix (Header' mods sym a :> more) =
-    BuildReflexClient (prefix :.: Sub (Header' mods sym a)) more
-  reflexClient' _ _ = reflexClient' (Proxy @(prefix :.: Sub (Header' mods sym a))) (Proxy @more)
+         HasReflexClient' cfg prefix (Header' mods sym a :> more) where
+  type BuildReflexClient cfg prefix (Header' mods sym a :> more) =
+    BuildReflexClient cfg (prefix :.: Sub (Header' mods sym a)) more
+  reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub (Header' mods sym a))) (Proxy @more)
 
 
 -- Verb
 
-instance UncurryClient (Verb method statusCode contentTypes a) where
-  type Arguments  (Verb method statusCode contentTypes a) = ()
-  type Result     (Verb method statusCode contentTypes a) = GenericClientM a
-  unCurry _ c _ = c
+instance UncurryClient cfg (Verb method statusCode contentTypes a) where
+  type Arguments  cfg (Verb method statusCode contentTypes a) = ()
+  type Result     cfg (Verb method statusCode contentTypes a) = GenericClientM a
+  unCurry cfg _ c _ = c
 
 instance ( HasClient (GenericClientM) (prefix $$ (Verb method statusCode contentTypes a))
-         , UncurryClient (prefix $$ (Verb method statusCode contentTypes a))
-         , GenericClientM a ~ Result (prefix $$ (Verb method statusCode contentTypes a))
+         , UncurryClient cfg (prefix $$ (Verb method statusCode contentTypes a))
+         , GenericClientM a ~ Result cfg (prefix $$ (Verb method statusCode contentTypes a))
          ) =>
-         HasReflexClient' prefix (Verb method statusCode contentTypes a) where
-  type BuildReflexClient prefix (Verb method statusCode contentTypes a) =
-    Endpoint (Arguments (prefix $$ (Verb method statusCode contentTypes a))) a
+         HasReflexClient' cfg prefix (Verb method statusCode contentTypes a) where
+  type BuildReflexClient cfg prefix (Verb method statusCode contentTypes a) =
+    Endpoint cfg (Arguments cfg (prefix $$ (Verb method statusCode contentTypes a))) a
 
-  reflexClient' _ _ =
+  reflexClient' cfg _ _ =
     let
       endpointProxy = Proxy @(prefix $$ (Verb method statusCode contentTypes a))
       cl :: Client GenericClientM (prefix $$ (Verb method statusCode contentTypes a))
       cl = endpointProxy `clientIn` Proxy @GenericClientM
-    in Endpoint $ unCurry endpointProxy cl
+    in Endpoint ((cfg,) <$> unCurry cfg endpointProxy cl)
 
 
 -- Raw
 
-instance UncurryClient Raw where
-  type Arguments  Raw = H.Method
-  type Result     Raw = GenericClientM Response
-  unCurry _ c m = c m
+instance UncurryClient cfg Raw where
+  type Arguments  cfg Raw = H.Method
+  type Result     cfg Raw = GenericClientM Response
+  unCurry cfg _ c m = c m
 
 instance ( HasClient (GenericClientM) (prefix $$ Raw)
-         , UncurryClient (prefix $$ Raw)
-         , GenericClientM Response ~ Result (prefix $$ Raw)
+         , UncurryClient cfg (prefix $$ Raw)
+         , GenericClientM Response ~ Result cfg (prefix $$ Raw)
          ) =>
-         HasReflexClient' prefix Raw where
-  type BuildReflexClient prefix Raw =
-    Endpoint (Arguments (prefix $$ Raw)) Response
+         HasReflexClient' cfg prefix Raw where
+  type BuildReflexClient cfg prefix Raw =
+    Endpoint cfg (Arguments cfg (prefix $$ Raw)) Response
 
-  reflexClient' _ _ =
+  reflexClient' cfg _ _ =
     let
       endpointProxy = Proxy @(prefix $$ Raw)
       cl :: Client GenericClientM (prefix $$ Raw)
       cl = endpointProxy `clientIn` Proxy @GenericClientM
-    in Endpoint $ unCurry endpointProxy cl
+    in Endpoint ((cfg,) <$> unCurry cfg endpointProxy cl)
