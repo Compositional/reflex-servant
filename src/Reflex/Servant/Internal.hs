@@ -10,10 +10,12 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Reflex.Servant.Internal
   ( module Reflex.Servant.Internal
   , module Reflex.Servant.Internal.GenericClientM
+  , module Reflex.Servant.Internal.Endpoint
   ) where
 
 import Data.Proxy
@@ -23,6 +25,7 @@ import Servant.API.Modifiers
 import Servant.Client.Core
 import Reflex.Servant.Internal.GenericClientM
 import Reflex.Servant.Internal.TypeFunction
+import Reflex.Servant.Internal.Endpoint
 
 
 import qualified Network.HTTP.Types                     as H
@@ -36,16 +39,28 @@ instance HasReflexClient' config I api => HasReflexClient config api
 
 ------------------------------------------------------------------------
 
--- | 'EndpointConfig' that provides extra configuration to its the runner
-data ConfiguredEndpointConfig c = ConfiguredEndpointConfig c
+-- TODO: replace by something like servant-server's context?
+data Config e = Config
+  { -- | Should be an instance of 'EndpointConfig'
+    --
+    -- For example:
+    --
+    --  * 'InstantiatedEndpointConfig', to generate calls that look like @'Reflex.Class.Event' t i -> m ('Reflex.Class.Event' t (Either 'ServantError' o))@
+    --  * 'ConfiguredEndpointConfig', to generate calls of a more general type that lets you instantiate @m@ at the call site and lets you use 'traverseEndpoint'
+    configEndpoint :: e
+  }
 
--- | An endpoint to be run by an implementation of @servant-client-core@ using
--- configuration @c@.
-newtype Endpoint c i o = Endpoint { runEndpoint :: i -> (c, GenericClientM o)
-                                  }
+instance EndpointConfig ec => EndpointConfig (Config ec) where
+  type EndpointOf (Config ec) i o = EndpointOf ec i o
+  mkEndpoint c = mkEndpoint $ configEndpoint c
 
 ------------------------------------------------------------------------
 
+-- | A configurable function from APIs to calls.
+--
+-- The @config@ parameter determines the details of call
+-- generation. You should pass a 'Config' here; it helps you compose a
+-- configuration.
 reflexClient :: HasReflexClient config api => config -> Proxy api -> ReflexClient config api
 reflexClient config api = reflexClient' config (Proxy @I) api
 
@@ -173,17 +188,18 @@ instance UncurryClient cfg (Verb method statusCode contentTypes a) where
 instance ( HasClient (GenericClientM) (prefix $$ (Verb method statusCode contentTypes a))
          , UncurryClient cfg (prefix $$ (Verb method statusCode contentTypes a))
          , GenericClientM a ~ Result cfg (prefix $$ (Verb method statusCode contentTypes a))
+         , EndpointConfig cfg
          ) =>
          HasReflexClient' cfg prefix (Verb method statusCode contentTypes a) where
   type BuildReflexClient cfg prefix (Verb method statusCode contentTypes a) =
-    Endpoint cfg (Arguments cfg (prefix $$ (Verb method statusCode contentTypes a))) a
+    EndpointOf cfg (Arguments cfg (prefix $$ (Verb method statusCode contentTypes a))) a
 
   reflexClient' cfg _ _ =
     let
       endpointProxy = Proxy @(prefix $$ (Verb method statusCode contentTypes a))
       cl :: Client GenericClientM (prefix $$ (Verb method statusCode contentTypes a))
       cl = endpointProxy `clientIn` Proxy @GenericClientM
-    in Endpoint ((cfg,) <$> unCurry cfg endpointProxy cl)
+    in mkEndpoint cfg $ unCurry cfg endpointProxy cl
 
 
 -- Raw
@@ -196,14 +212,15 @@ instance UncurryClient cfg Raw where
 instance ( HasClient (GenericClientM) (prefix $$ Raw)
          , UncurryClient cfg (prefix $$ Raw)
          , GenericClientM Response ~ Result cfg (prefix $$ Raw)
+         , EndpointConfig cfg
          ) =>
          HasReflexClient' cfg prefix Raw where
   type BuildReflexClient cfg prefix Raw =
-    Endpoint cfg (Arguments cfg (prefix $$ Raw)) Response
+    EndpointOf cfg (Arguments cfg (prefix $$ Raw)) Response
 
   reflexClient' cfg _ _ =
     let
       endpointProxy = Proxy @(prefix $$ Raw)
       cl :: Client GenericClientM (prefix $$ Raw)
       cl = endpointProxy `clientIn` Proxy @GenericClientM
-    in Endpoint ((cfg,) <$> unCurry cfg endpointProxy cl)
+    in mkEndpoint cfg $ unCurry cfg endpointProxy cl
