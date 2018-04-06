@@ -21,8 +21,14 @@ module Reflex.Servant
   , endpoint
   , traverseEndpoint
 
+  , Tuple(..)
+  , Fish(..)
+  , InductiveFish(..)
+  , InductivePair(..)
+
     -- * Types
   , EndpointConfig
+  , ProductConfig
 
   ) where
 

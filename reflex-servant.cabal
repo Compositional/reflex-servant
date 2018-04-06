@@ -20,8 +20,9 @@ library
   exposed-modules:     Reflex.Servant
                      , Reflex.Servant.Internal
                      , Reflex.Servant.Internal.Endpoint
-                     , Reflex.Servant.Internal.TypeFunction
                      , Reflex.Servant.Internal.GenericClientM
+                     , Reflex.Servant.Internal.Product
+                     , Reflex.Servant.Internal.TypeFunction
   -- other-modules:       
   other-extensions:    DataKinds
                      , DeriveFunctor
