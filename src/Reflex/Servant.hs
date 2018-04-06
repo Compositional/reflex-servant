@@ -9,24 +9,29 @@ module Reflex.Servant
   , HasReflexClient
   , ReflexClient
 
-    -- * Simple configuration
+    -- * Configuration basics
+  , basicConfig
+  , defaultConfig
   , Config(..)
+
+    -- * Basic endpoint configuration
   , InstantiatedEndpointConfig(..)
+
+    -- * General endpoint configuration
+  , ConfiguredEndpointConfig(..)
   , ServantClientRunner
   , GenericClientM(..)
-
-    -- * General configuration
-  , ConfiguredEndpointConfig(..)
   , Endpoint(..)
   , endpoint
   , traverseEndpoint
 
+    -- * Product type configuration
   , Tuple(..)
   , Fish(..)
   , InductiveFish(..)
   , InductivePair(..)
 
-    -- * Types
+    -- * Configuration type classes
   , EndpointConfig
   , ProductConfig
 
@@ -37,3 +42,11 @@ import Servant.Client.Core
 import Reflex
 import Control.Monad.Identity
 import Data.Coerce
+
+-- | A very basic configuration for concrete @m@ that does not support 'traverseEndpoint'.
+basicConfig :: ServantClientRunner () (Performable m) -> Config (InstantiatedEndpointConfig t m) Tuple
+basicConfig runner = Config (InstantiatedEndpointConfig runner) Tuple
+
+-- | A default configuration that makes the @ec@ (endpoint config) argument available to the endpoint runner.
+defaultConfig :: ec -> Config (ConfiguredEndpointConfig ec) InductivePair
+defaultConfig ec = Config (ConfiguredEndpointConfig ec) InductivePair

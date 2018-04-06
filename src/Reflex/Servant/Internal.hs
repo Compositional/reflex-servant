@@ -38,12 +38,18 @@ import qualified Network.HTTP.Types                     as H
 -- for various @i@ and @o@.
 type ReflexClient config api = BuildReflexClient config I api
 
+-- | Declares that reflex clients can be derived from this @api@.
+--
+-- This is 'HasReflexClient'' for complete API's. This indicates that @api@ is a self-sufficient API that works without being part of a larger API.
 class HasReflexClient' config I api => HasReflexClient config api
 instance HasReflexClient' config I api => HasReflexClient config api
 
 ------------------------------------------------------------------------
 
 -- TODO: replace by something like servant-server's context?
+
+-- | This composes a configuration from independent aspects like
+-- endpoint style and which product type to use.
 data Config e p = Config
   { -- | Should be an instance of 'EndpointConfig'
     --
@@ -83,6 +89,20 @@ reflexClient config api = reflexClient' config (Proxy @I) api
 
 -- prefix:  single-endpoint api builder
 -- api:     api (pattern matching)
+-- | Declares that reflex clients can be derived from this @api@.
+--
+-- The @prefix@ type argument is a type level function (in the sense
+-- of 'Reflex.Servant.Internal.TypeFunction.$$') that builds an API
+-- that represents the relevant parts of the larger API that @api@ was
+-- in. At the root of the API this is the identity
+-- ('Reflex.Servant.Internal.TypeFunction.I') and it grows towards the
+-- leaves.
+--
+-- The @api@ type argument is the subject of structural recursion using
+-- pattern matching by instance head; it shrinks towards the leaves.
+--
+-- The @config@ type argument is just there as a \'global\' environment.
+-- It gets passed around as a value too.
 class HasReflexClient' (config :: *) (prefix :: *) (api :: *) where
   type BuildReflexClient config prefix api :: *
   reflexClient' :: config -> Proxy prefix -> Proxy api -> BuildReflexClient config prefix api
@@ -197,6 +217,14 @@ instance ( HasReflexClient' cfg (prefix :.: Sub (Header' mods sym a)) more
   type BuildReflexClient cfg prefix (Header' mods sym a :> more) =
     BuildReflexClient cfg (prefix :.: Sub (Header' mods sym a)) more
   reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub (Header' mods sym a))) (Proxy @more)
+
+
+------------------------------------------------------------------------
+-- leaves
+--
+-- These terminate HasReflexClient and delegate to, most notably,
+-- UncurryClient and servant-client-core's HasClient to do the dirty
+-- work.
 
 
 -- Verb
