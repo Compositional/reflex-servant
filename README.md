@@ -14,6 +14,8 @@ Let's start with some pragma's and imports.
 {-# LANGUAGE ConstraintKinds, DataKinds, FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings, RankNTypes, ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications, TypeOperators #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE TypeFamilies #-}
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Proxy
@@ -22,14 +24,17 @@ import Reflex
 import Reflex.Servant
 import Servant.API
 import Servant.Client.Core
+
+import Reflex.Servant.Internal.TypeFunction
+import Reflex.Servant.Internal
 ```
 
 ... and an example API:
 
 ```haskell
-type Api = "ping" :> Get '[JSON] Text
-      :<|> "calendar" :> Capture "calendarName" Text :> "items" :> Get '[JSON] [(Timestamp, Text)]
-      :<|> "calendar" :> Capture "calendarName" Text :> "items" :> ReqBody '[JSON] (Timestamp, Text) :> Post '[JSON] [(Timestamp, Text)]
+type Api = Get '[JSON] Text
+      :<|> Capture "calendarName" Text :> Get '[JSON] [(Timestamp, Text)]
+      :<|> Capture "calendarName" Text :> ReqBody '[JSON] (Timestamp, Text) :> Post '[JSON] [(Timestamp, Text)]
 
 -- not important
 type Timestamp = Int
@@ -43,6 +48,7 @@ myApp :: forall t m. MonadWidget t m => m ()
 myApp = do
   postBuild <- getPostBuild
   let ping :<|> list :<|> post = reflexClient (basicConfig myRunner) (Proxy @Api)
+  (t :: Event t (Either ServantError Text)) <- ping (never)
   calendarResponse <- list ("Birthday calendar" <$ postBuild)
   calendar <- holdDyn [] (filterRight calendarResponse)
   showCalendar calendar

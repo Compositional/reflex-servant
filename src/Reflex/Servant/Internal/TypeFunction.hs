@@ -10,11 +10,11 @@ module Reflex.Servant.Internal.TypeFunction where
 
 -- | Type application as a type family. This lets you avoid having to fully
 -- apply some types, at the cost of type inference in some scenarios.
-type family (p :: kf) $$ (q :: ka)
+type family (p :: kf) $$ (q :: ka) :: kb
 
 type instance (g :.: f) $$ a = g $$ (f $$ a)
 type instance I $$ a = a
-type instance Lift f $$ a = f a
+type instance Lift (f :: k -> k') $$ (a :: k) = f a
 
 -- | Type function composition.
 --

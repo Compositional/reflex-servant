@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -24,13 +25,14 @@ import Data.Proxy
 import GHC.TypeLits
 import GHC.Exts(Constraint)
 import Servant.API
+#if MIN_VERSION_servant(0,13,0)
 import Servant.API.Modifiers
+#endif
 import Servant.Client.Core
 import Reflex.Servant.Internal.GenericClientM
 import Reflex.Servant.Internal.TypeFunction
 import Reflex.Servant.Internal.Endpoint
 import Reflex.Servant.Internal.Product
-
 
 import qualified Network.HTTP.Types                     as H
 
@@ -155,7 +157,7 @@ instance UncurryClient cfg more => UncurryClient cfg (Description sym :> more) w
 
 instance ( UncurryClient cfg more
          , ProductConstr cfg (Arguments cfg more)
-         ) => UncurryClient cfg (QueryParams sym a :> more) where
+         ) => UncurryClient cfg (QueryParams sym (a :: *) :> more) where
   type Arguments  cfg (QueryParams sym a :> more) = [a] : Arguments cfg more
   type Result     cfg (QueryParams sym a :> more) = Result cfg more
   unCurry cfg _ c (uncons cfg (Proxy @(Arguments cfg more)) -> (a, as)) = unCurry cfg (Proxy @more) (c a) as
@@ -170,35 +172,64 @@ instance ( HasReflexClient' cfg (prefix $$ Sub (QueryParams sym a)) more
 
 -- ReqBody
 
+#if MIN_VERSION_servant(0,13,0)
 instance ( UncurryClient cfg more
          , ProductConstr cfg (Arguments cfg more)
-         ) => UncurryClient cfg (ReqBody' mods (ct ': cts) a :> more) where
+         ) => UncurryClient cfg (ReqBody' mods (ct ': cts) (a :: *) :> more) where
   type Arguments  cfg (ReqBody' mods (ct ': cts) a :> more) = a ': Arguments cfg more
   type Result     cfg (ReqBody' mods (ct ': cts) a :> more) = Result cfg more
+#else
+instance ( UncurryClient cfg more
+         , ProductConstr cfg (Arguments cfg more)
+         ) => UncurryClient cfg (ReqBody (ct ': cts) (a :: *) :> more) where
+  type Arguments  cfg (ReqBody (ct ': cts) a :> more) = a ': Arguments cfg more
+  type Result     cfg (ReqBody (ct ': cts) a :> more) = Result cfg more
+#endif
   unCurry cfg _ c (uncons cfg (Proxy @(Arguments cfg more)) -> (a, as)) = unCurry cfg (Proxy @more) (c a) as
 
+#if MIN_VERSION_servant(0,13,0)
 instance ( HasReflexClient' cfg (prefix :.: Sub (ReqBody' mods (ct ': cts) a)) more
          ) =>
          HasReflexClient' cfg prefix (ReqBody' mods (ct ': cts) a :> more) where
   type BuildReflexClient cfg prefix (ReqBody' mods (ct ': cts) a :> more) =
     BuildReflexClient cfg (prefix :.: Sub (ReqBody' mods (ct ': cts) a)) more
+#else
+instance ( HasReflexClient' cfg (prefix :.: Sub (ReqBody' mods (ct ': cts) a)) more
+         ) =>
+         HasReflexClient' cfg prefix (ReqBody (ct ': cts) a :> more) where
+  type BuildReflexClient cfg prefix (ReqBody (ct ': cts) a :> more) =
+    BuildReflexClient cfg (prefix :.: Sub (ReqBody (ct ': cts) a)) more
+#endif
   reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub (ReqBody' mods (ct ': cts) a))) (Proxy @more)
 
 
 -- Capture
 
+#if MIN_VERSION_servant(0,13,0)
 instance ( UncurryClient cfg more
          , ProductConstr cfg (Arguments cfg more)
-         ) => UncurryClient cfg (Capture' mods sym a :> more) where
+         ) => UncurryClient cfg (Capture' mods sym (a :: *) :> more) where
   type Arguments  cfg (Capture' mods sym a :> more) = a ': Arguments cfg more
   type Result     cfg (Capture' mods sym a :> more) = Result cfg more
+#else
+instance ( UncurryClient cfg more
+         , ProductConstr cfg (Arguments cfg more)
+         ) => UncurryClient cfg (Capture sym (a :: *) :> more) where
+  type Arguments  cfg (Capture sym a :> more) = a ': Arguments cfg more
+  type Result     cfg (Capture sym a :> more) = Result cfg more
+#endif
   unCurry cfg _ c (uncons cfg (Proxy @(Arguments cfg more)) -> (a, as)) = unCurry cfg (Proxy @more) (c a) as
 
 instance ( HasReflexClient' cfg (prefix :.: Sub (Capture' mods sym a)) more
          ) =>
-         HasReflexClient' cfg prefix (Capture' mods sym a :> more) where
+         HasReflexClient' cfg prefix (Capture' mods sym (a :: *) :> more) where
+#if MIN_VERSION_servant(0,13,0)
   type BuildReflexClient cfg prefix (Capture' mods sym a :> more) =
     BuildReflexClient cfg (prefix :.: Sub (Capture' mods sym a)) more
+#else
+  type BuildReflexClient cfg prefix (Capture sym a :> more) =
+    BuildReflexClient cfg (prefix :.: Sub (Capture sym a)) more
+#endif
   reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub (Capture' mods sym a))) (Proxy @more)
 
 
@@ -207,15 +238,25 @@ instance ( HasReflexClient' cfg (prefix :.: Sub (Capture' mods sym a)) more
 instance ( UncurryClient cfg more
          , ProductConstr cfg (Arguments cfg more)
          ) => UncurryClient cfg (Header' mods sym (a :: *) :> more) where
+#if MIN_VERSION_servant(0,13,0)
   type Arguments  cfg (Header' mods sym a :> more) = RequiredArgument mods a ': Arguments cfg more
   type Result     cfg (Header' mods sym a :> more) = Result cfg more
+#else
+  type Arguments  cfg (Header sym a :> more) = Maybe a ': Arguments cfg more
+  type Result     cfg (Header sym a :> more) = Result cfg more
+#endif
   unCurry cfg _ c (uncons cfg (Proxy @(Arguments cfg more)) -> (a, as)) = unCurry cfg (Proxy @more) (c a) as
 
 instance ( HasReflexClient' cfg (prefix :.: Sub (Header' mods sym a)) more
          ) =>
          HasReflexClient' cfg prefix (Header' mods sym a :> more) where
+#if MIN_VERSION_servant(0,13,0)
   type BuildReflexClient cfg prefix (Header' mods sym a :> more) =
     BuildReflexClient cfg (prefix :.: Sub (Header' mods sym a)) more
+#else
+  type BuildReflexClient cfg prefix (Header sym a :> more) =
+    BuildReflexClient cfg (prefix :.: Sub (Header sym a)) more
+#endif
   reflexClient' cfg _ _ = reflexClient' cfg (Proxy @(prefix :.: Sub (Header' mods sym a))) (Proxy @more)
 
 
@@ -229,7 +270,7 @@ instance ( HasReflexClient' cfg (prefix :.: Sub (Header' mods sym a)) more
 
 -- Verb
 
-instance UncurryClient cfg (Verb method statusCode contentTypes a) where
+instance UncurryClient cfg (Verb method statusCode contentTypes (a :: *)) where
   type Arguments  cfg (Verb method statusCode contentTypes a) = '[]
   type Result     cfg (Verb method statusCode contentTypes a) = GenericClientM a
   unCurry cfg _ (c) _ = c
@@ -276,3 +317,9 @@ instance ( HasClient GenericClientM (prefix $$ Raw)
       cl :: Client GenericClientM (prefix $$ Raw)
       cl = endpointProxy `clientIn` Proxy @GenericClientM
     in mkEndpoint cfg $ unCurry cfg endpointProxy cl
+
+#if !MIN_VERSION_servant(0,13,0)
+type Header' mods = Header
+type Capture' mods = Capture
+type ReqBody' mods = ReqBody
+#endif

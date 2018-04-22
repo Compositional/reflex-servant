@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE DeriveFunctor #-}
 module Reflex.Servant.Internal.GenericClientM where
@@ -20,6 +21,8 @@ instance Monad GenericClientM where
 
 instance RunClient GenericClientM where
   runRequest r = GenericClientM (runRequest r)
-  streamingRequest r = GenericClientM (streamingRequest r)
   throwServantError e = GenericClientM (throwServantError e)
   catchServantError (GenericClientM m) f = GenericClientM (catchServantError m (runGenericClientM . f))
+#if MIN_VERSION_servant_client_core(0,13,0)
+  streamingRequest r = GenericClientM (streamingRequest r)
+#endif
