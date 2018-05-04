@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -10,6 +11,8 @@ import Reflex
 import Reflex.Servant.Internal.GenericClientM
 import Servant.Client.Core
 import Servant.Client.Core
+import Control.Monad.Trans(MonadIO, liftIO)
+import Control.Concurrent(forkIO)
 
 
 class EndpointConfig ec where
@@ -30,11 +33,14 @@ type ServantClientRunner cfg m = cfg -> forall a. GenericClientM a -> m (Either 
 --   * No 'traverseEndpoint'
 --   * No automatic lifting into monad transformers. You need to call 'Reflex.Servant.reflexClient' for every concrete @m@.
 --
-data InstantiatedEndpointConfig t m = InstantiatedEndpointConfig
-  { instantiatedEndpointConfigRunner :: ServantClientRunner () (Performable m)
+data InstantiatedEndpointConfig t (m :: * -> *) = InstantiatedEndpointConfig
+  { instantiatedEndpointConfigRunner :: ServantClientRunner () IO
   }
 
-instance PerformEvent t m => EndpointConfig (InstantiatedEndpointConfig t m) where
+instance ( PerformEvent t m
+         , TriggerEvent t m
+         , MonadIO (Performable m)
+         ) => EndpointConfig (InstantiatedEndpointConfig t m) where
   type EndpointOf (InstantiatedEndpointConfig t m) i o = Event t i -> m (Event t (Either ServantError o))
   mkEndpoint (InstantiatedEndpointConfig r) ep ev = endpoint r (Endpoint (((),) <$> ep)) ev
 
@@ -55,9 +61,19 @@ instance EndpointConfig (ConfiguredEndpointConfig c) where
 
 ------------------------------------------------------------------------
 
+-- | Perform a request to an endpoint.
+--
+-- You may want to use 'Language.Javascript.JSaddle.askJSM' and
+-- 'Language.Javascript.JSaddle.runJSM' to unlift a client runner
+-- into @IO@.
+--
 endpoint
-  :: forall t m ec i o. PerformEvent t m
-  => ServantClientRunner ec (Performable m)
+  :: forall t m ec i o.
+     ( PerformEvent t m
+     , TriggerEvent t m
+     , MonadIO (Performable m)
+     )
+  => ServantClientRunner ec IO
   -> Endpoint ec i o
   -> Event t i
   -> m (Event t (Either ServantError o))
@@ -74,16 +90,26 @@ endpoint runner endpnt requestE = (coerceEvent :: Event t (Identity a) -> Event 
 -- The special case of zero elements is NOT handled differently, so
 -- although the \'response\' will be quick, it seems likely that it
 -- will occur in a subsequent frame.
+--
+-- You may want to use 'Language.Javascript.JSaddle.askJSM' and
+-- 'Language.Javascript.JSaddle.runJSM' to unlift the client runner
+-- into @IO@.
+--
 traverseEndpoint
   :: ( PerformEvent t m
+     , TriggerEvent t m
+     , MonadIO (Performable m)
      , Traversable f
      )
-  => ServantClientRunner ec (Performable m)
+  => ServantClientRunner ec IO
   -> Endpoint ec i o
   -> Event t (f i)
   -> m (Event t (f (Either ServantError o)))
-traverseEndpoint runner endpnt requestE = do
-  performEvent $ ffor requestE $ traverse (uncurry runner . runEndpoint endpnt)
+traverseEndpoint runner endpnt requestEvent = do
+  performEventAsync $ ffor requestEvent $ \requestF emit -> do
+    void $ liftIO $ forkIO $ do
+      r <- traverse (uncurry runner . runEndpoint endpnt) requestF
+      emit r
 
 -- TODO:
 -- A variation of traverseEndpoint could make the response event immediate

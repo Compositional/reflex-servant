@@ -86,7 +86,7 @@ myApp' = do
   showCalendar calendar
 
 endpoint'
-    :: PerformEvent t m
+    :: (PerformEvent t m, TriggerEvent t m, MonadIO (Performable m))
     => Endpoint () i o
     -> Event t i
     -> m (Event t (Either ServantError o))
@@ -106,7 +106,7 @@ calendarConfig' = (defaultConfig myRunner)
   }
 
 endpoint''
-    :: PerformEvent t m
+    :: (PerformEvent t m, TriggerEvent t m, MonadIO (Performable m))
     => Endpoint Service i o
     -> Event t i
     -> m (Event t (Either ServantError o))
@@ -135,7 +135,7 @@ main = pure ()
 To illustrate the use of `reflex-servant` we have pretended to use `reflex-dom`, but actually this library does not depend on any particular reflex host. These are the fake definitions use to typecheck this document.
 
 ```haskell
-type MonadWidget t m = (Reflex t, MonadHold t m, MonadSample t (Performable m), PerformEvent t m, MonadIO (Performable m), PostBuild t m)
+type MonadWidget t m = (Reflex t, MonadHold t m, MonadSample t (Performable m), PerformEvent t m, TriggerEvent t m, MonadIO (Performable m), PostBuild t m)
 
 dyn :: MonadWidget t m => Dynamic t (m a) -> m (Event t a)
 dyn = undefined

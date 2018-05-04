@@ -44,7 +44,7 @@ import Control.Monad.Identity
 import Data.Coerce
 
 -- | A very basic configuration for concrete @m@ that does not support 'traverseEndpoint'.
-basicConfig :: ServantClientRunner () (Performable m) -> Config (InstantiatedEndpointConfig t m) Tuple
+basicConfig :: ServantClientRunner () IO -> Config (InstantiatedEndpointConfig t m) Tuple
 basicConfig runner = Config (InstantiatedEndpointConfig runner) Tuple
 
 -- | A default configuration that makes the @ec@ (endpoint config) argument available to the endpoint runner.
